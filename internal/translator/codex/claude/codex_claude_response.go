@@ -107,8 +107,21 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
 		} else {
 			template, _ = sjson.Set(template, "delta.stop_reason", "end_turn")
 		}
-		template, _ = sjson.Set(template, "usage.input_tokens", rootResult.Get("response.usage.input_tokens").Int())
-		template, _ = sjson.Set(template, "usage.output_tokens", rootResult.Get("response.usage.output_tokens").Int())
+		usageNode := rootResult.Get("response.usage")
+		template, _ = sjson.Set(template, "usage.input_tokens", usageNode.Get("input_tokens").Int())
+		template, _ = sjson.Set(template, "usage.output_tokens", usageNode.Get("output_tokens").Int())
+		if usageNode.Get("cache_creation_input_tokens").Exists() {
+			template, _ = sjson.Set(template, "usage.cache_creation_input_tokens", usageNode.Get("cache_creation_input_tokens").Int())
+		}
+		if usageNode.Get("cache_read_input_tokens").Exists() {
+			template, _ = sjson.Set(template, "usage.cache_read_input_tokens", usageNode.Get("cache_read_input_tokens").Int())
+		} else if usageNode.Get("input_tokens_details.cached_tokens").Exists() {
+			cached := usageNode.Get("input_tokens_details.cached_tokens").Int()
+			template, _ = sjson.Set(template, "usage.cache_read_input_tokens", cached)
+			if !usageNode.Get("cache_creation_input_tokens").Exists() {
+				template, _ = sjson.Set(template, "usage.cache_creation_input_tokens", cached)
+			}
+		}
 
 		output = "event: message_delta\n"
 		output += fmt.Sprintf("data: %s\n\n", template)
@@ -318,10 +331,23 @@ func ConvertCodexResponseToClaudeNonStream(_ context.Context, _ string, original
 	}
 
 	if responseData.Get("usage.input_tokens").Exists() || responseData.Get("usage.output_tokens").Exists() {
-		response["usage"] = map[string]interface{}{
+		usage := map[string]interface{}{
 			"input_tokens":  responseData.Get("usage.input_tokens").Int(),
 			"output_tokens": responseData.Get("usage.output_tokens").Int(),
 		}
+		if responseData.Get("usage.cache_creation_input_tokens").Exists() {
+			usage["cache_creation_input_tokens"] = responseData.Get("usage.cache_creation_input_tokens").Int()
+		}
+		if responseData.Get("usage.cache_read_input_tokens").Exists() {
+			usage["cache_read_input_tokens"] = responseData.Get("usage.cache_read_input_tokens").Int()
+		} else if responseData.Get("usage.input_tokens_details.cached_tokens").Exists() {
+			cached := responseData.Get("usage.input_tokens_details.cached_tokens").Int()
+			usage["cache_read_input_tokens"] = cached
+			if !responseData.Get("usage.cache_creation_input_tokens").Exists() {
+				usage["cache_creation_input_tokens"] = cached
+			}
+		}
+		response["usage"] = usage
 	}
 
 	responseJSON, err := json.Marshal(response)
